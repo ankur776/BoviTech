@@ -1,6 +1,5 @@
 # app.py - Streamlit app for Cow vs. Buffalo classification
 # Loads the trained H5 model and classifies uploaded images
-
 import streamlit as st
 import tensorflow as tf
 from PIL import Image
