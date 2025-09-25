@@ -7,9 +7,7 @@ Original file is located at
     https://colab.research.google.com/drive/1SzmZsBF3nf0UoiFFJQoAEEZ1DjmyR_nK
 """
 #!/bin/bash
-!curl -L -o ~/cows-and-buffalo-computer-vision-dataset.zip\
-  https://www.kaggle.com/api/v1/datasets/download/raghavdharwal/cows-and-buffalo-computer-vision-dataset
-!unzip ~/cows-and-buffalo-computer-vision-dataset.zip -d ~/cows-and-buffalo-computer-vision-dataset
+
 
 """## Train the model
 
