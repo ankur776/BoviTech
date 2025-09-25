@@ -1,5 +1,6 @@
 # app.py - Updated Streamlit app with integrated training trigger
 # Auto-trains if model missing; supports batch upload and demo mode
+# Matplotlib import moved inside conditional (no crash if not installed)
 
 import streamlit as st
 import tensorflow as tf
@@ -10,7 +11,6 @@ import json
 import numpy as np
 from PIL import Image
 import pickle
-import matplotlib.pyplot as plt
 
 # Page config
 st.set_page_config(
@@ -148,17 +148,23 @@ with st.sidebar:
     - Deploy: GitHub + Streamlit Cloud.
     """)
     
-    # Training history plot
+    # Training history plot (lazy-load matplotlib)
     if st.checkbox("📈 Show Training History") and os.path.exists('training_history.pkl'):
         try:
+            # Import matplotlib only here (avoids crash if not installed)
+            import matplotlib.pyplot as plt
             with open('training_history.pkl', 'rb') as f:
                 history = pickle.load(f)
             fig, ax = plt.subplots()
             ax.plot(history['accuracy'], label='Train Acc')
             ax.plot(history['val_accuracy'], label='Val Acc')
             ax.set_title('Training History')
+            ax.set_xlabel('Epoch')
+            ax.set_ylabel('Accuracy')
             ax.legend()
             st.pyplot(fig)
+        except ImportError:
+            st.warning("Matplotlib not installed. Install with 'pip install matplotlib' to view plots.")
         except Exception as e:
             st.error(f"Plot error: {e}")
 
