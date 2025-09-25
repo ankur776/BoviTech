@@ -31,6 +31,7 @@ def ensure_model_trained():
                 st.error(f"Training failed: {result.stderr}")
                 return None
             st.sidebar.success("Training completed!")
+            st.rerun()  # Refresh to load model
         except subprocess.TimeoutExpired:
             st.error("Training timed out. Run 'python train_model.py' manually in terminal.")
             return None
@@ -131,7 +132,7 @@ with st.sidebar:
     if not model:
         if st.button("🚀 Train Model Now", type="primary"):
             st.rerun()  # Triggers ensure_model_trained()
-        st.info("Click above to auto-train (requires Kaggle setup).")
+        st.info("Click above to auto-train (requires Kaggle setup). Or pre-train locally and commit model files.")
     
     st.header("📊 Model Info")
     st.write("""
@@ -145,13 +146,13 @@ with st.sidebar:
     st.write("""
     - Clear, lit images work best.
     - Batch: Upload multiple for quick tests.
-    - Deploy: GitHub + Streamlit Cloud.
+    - Deploy: Pre-train model locally for Cloud (commit .h5 file).
     """)
     
     # Training history plot (lazy-load matplotlib)
     if st.checkbox("📈 Show Training History") and os.path.exists('training_history.pkl'):
         try:
-            # Import matplotlib only here (avoids crash if not installed)
+            # Import matplotlib ONLY here (lazy-load: no crash if missing)
             import matplotlib.pyplot as plt
             with open('training_history.pkl', 'rb') as f:
                 history = pickle.load(f)
@@ -164,7 +165,7 @@ with st.sidebar:
             ax.legend()
             st.pyplot(fig)
         except ImportError:
-            st.warning("Matplotlib not installed. Install with 'pip install matplotlib' to view plots.")
+            st.warning("Matplotlib not installed. Install with 'pip install matplotlib' (or add to requirements.txt) to view plots.")
         except Exception as e:
             st.error(f"Plot error: {e}")
 
