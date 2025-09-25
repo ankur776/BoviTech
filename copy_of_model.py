@@ -1,147 +1,167 @@
-# app.py - Streamlit app for Cow vs. Buffalo classification
-# Loads the trained H5 model and classifies uploaded images
+# app.py - Updated Streamlit app with integrated training trigger
+# Auto-trains if model missing; supports batch upload and demo mode
 
 import streamlit as st
 import tensorflow as tf
-from PIL import Image
-import numpy as np
+import subprocess
+import sys
+import os
 import json
+import numpy as np
+from PIL import Image
+import pickle
+import matplotlib.pyplot as plt
 
-# Page config for better layout
+# Page config
 st.set_page_config(
     page_title="Cow vs. Buffalo Classifier",
     page_icon="🐄",
     layout="wide"
 )
 
-# Load class names (cached, with fallback)
+# Function to run training script if model missing
+@st.cache_resource
+def ensure_model_trained():
+    if not os.path.exists('cow_buffalo_model.h5'):
+        st.sidebar.warning("Model not found. Training now...")
+        try:
+            # Run train_model.py as subprocess
+            result = subprocess.run([sys.executable, 'train_model.py'], capture_output=True, text=True, timeout=1800)  # 30 min timeout
+            if result.returncode != 0:
+                st.error(f"Training failed: {result.stderr}")
+                return None
+            st.sidebar.success("Training completed!")
+        except subprocess.TimeoutExpired:
+            st.error("Training timed out. Run 'python train_model.py' manually in terminal.")
+            return None
+        except FileNotFoundError:
+            st.error("train_model.py not found. Ensure both .py files are in the same folder.")
+            return None
+    return True
+
+# Load class names
 @st.cache_data
 def load_class_names():
     try:
         with open('class_names.json', 'r') as f:
             return json.load(f)
     except FileNotFoundError:
-        st.error("class_names.json not found. Run train_model.py first to generate it.")
-        return ['buffalo', 'cow']  # Fallback (alphabetical)
+        return ['buffalo', 'cow']  # Fallback
 
 class_names = load_class_names()
 
-# Load the trained model (cached for efficiency)
+# Load model
 @st.cache_resource
 def load_model():
     try:
         model = tf.keras.models.load_model('cow_buffalo_model.h5')
-        st.success("Model loaded successfully!")
         return model
     except FileNotFoundError:
-        st.error("cow_buffalo_model.h5 not found. Run train_model.py first to train and save the model.")
         return None
     except Exception as e:
-        st.error(f"Error loading model: {str(e)}. Check TensorFlow version compatibility.")
+        st.error(f"Model load error: {str(e)}")
         return None
 
-model = load_model()
+# Ensure trained and load
+trained = ensure_model_trained()
+model = load_model() if trained else None
 
-# Main title and description
+# Title
 st.title('🐄 Cow vs. 🐃 Buffalo Image Classifier')
 st.markdown("""
-Upload an image below to classify it as 'Cow' or 'Buffalo' using a MobileNetV2 transfer learning model.  
-The model was trained on the [Kaggle Cows and Buffalo Computer Vision Dataset](https://www.kaggle.com/datasets/raghavdharwal/cows-and-buffalo-computer-vision-dataset)  
-with data augmentation for better generalization.
+Classify images as 'Cow' or 'Buffalo' using MobileNetV2 transfer learning.  
+Trained on [Kaggle Dataset](https://www.kaggle.com/datasets/raghavdharwal/cows-and-buffalo-computer-vision-dataset) with augmentation.
 """)
 
-# File uploader (supports multiple files for batch testing)
+# Status
+if model:
+    st.success("✅ Model loaded and ready!")
+else:
+    st.warning("⚠️ Model not available. Use sidebar to train.")
+    if st.button("Demo Mode (Dummy Prediction)"):
+        st.info("Demo: This uses fallback classes. Upload a real image after training.")
+
+# Uploader
 uploaded_files = st.file_uploader(
-    "Choose image file(s) (JPG, JPEG, or PNG)...", 
+    "Choose image(s) (JPG, PNG)...",
     type=['jpg', 'jpeg', 'png'],
     accept_multiple_files=True
 )
 
-# Process uploaded files
-if uploaded_files and model is not None:
-    st.subheader("Classification Results")
-    for uploaded_file in uploaded_files:
-        # Display image
+if uploaded_files and model:
+    st.subheader("Results")
+    progress_bar = st.progress(0)
+    for idx, uploaded_file in enumerate(uploaded_files):
         image = Image.open(uploaded_file)
-        st.image(image, caption=f'Uploaded: {uploaded_file.name}', use_column_width=True)
+        st.image(image, caption=uploaded_file.name, use_column_width=True)
         
-        # Preprocess (match training exactly: RGB, resize, normalize)
         with st.spinner(f'Classifying {uploaded_file.name}...'):
-            img = image.convert('RGB').resize((224, 224))  # Ensure RGB
-            img_array = np.array(img, dtype=np.float32)
-            img_array = np.expand_dims(img_array, axis=0)  # Shape: (1, 224, 224, 3)
-            img_array = img_array / 255.0  # Normalize to [0,1]
+            img = image.convert('RGB').resize((224, 224))
+            img_array = np.array(img, dtype=np.float32) / 255.0
+            img_array = np.expand_dims(img_array, axis=0)
         
-        # Predict
-        try:
-            predictions = model.predict(img_array, verbose=0)
-            score = tf.nn.softmax(predictions[0]).numpy()  # Probabilities
-            predicted_idx = np.argmax(score)
-            predicted_class = class_names[predicted_idx]
-            confidence = 100 * score[predicted_idx]
-            
-            # Results layout
-            col1, col2 = st.columns([2, 1])
-            with col1:
-                if confidence > 80:
-                    st.success(f'**Predicted: {predicted_class.upper()}**')
-                else:
-                    st.warning(f'**Predicted: {predicted_class.upper()}** (Low confidence)')
-                st.info(f'Confidence: {confidence:.2f}%')
-            with col2:
-                probs = {class_names[i]: f"{100 * score[i]:.1f}%" for i in range(len(class_names))}
-                for cls, prob in probs.items():
-                    st.metric(cls.capitalize(), prob)
-            
-            # Confidence threshold warning
-            if confidence < 70:
-                st.warning("Low confidence prediction. Try a clearer image of a cow or buffalo.")
-            
-            # Bar chart for visual
-            st.bar_chart({cls: float(prob.strip('%')) for cls, prob in probs.items()})
-            
-        except Exception as e:
-            st.error(f"Prediction failed for {uploaded_file.name}: {str(e)}")
-elif uploaded_files and model is None:
-    st.warning("Files uploaded, but model not loaded. Train the model first with train_model.py.")
+        predictions = model.predict(img_array, verbose=0)
+        score = tf.nn.softmax(predictions[0]).numpy()
+        predicted_idx = np.argmax(score)
+        predicted_class = class_names[predicted_idx]
+        confidence = 100 * score[predicted_idx]
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            color = "success" if confidence > 80 else "warning"
+            st.markdown(f'<h3 style="color: {"green" if color=="success" else "orange"};">**{predicted_class.upper()}**</h3>', unsafe_allow_html=True)
+            st.info(f'Confidence: {confidence:.2f}%')
+        with col2:
+            probs = {class_names[i]: f"{100 * score[i]:.1f}%" for i in range(len(class_names))}
+            for cls, prob in probs.items():
+                st.metric(cls.capitalize(), prob)
+        
+        if confidence < 70:
+            st.warning("Low confidence—try a clearer image.")
+        
+        st.bar_chart({cls: float(prob.strip('%')) for cls, prob in probs.items()})
+        
+        progress_bar.progress((idx + 1) / len(uploaded_files))
+elif uploaded_files and not model:
+    st.warning("Upload ready, but train the model first via sidebar.")
 
-# Sidebar with model info and tips
+# Sidebar
 with st.sidebar:
-    st.header("📊 Model Details")
+    st.header("🔧 Controls")
+    if not model:
+        if st.button("🚀 Train Model Now", type="primary"):
+            st.rerun()  # Triggers ensure_model_trained()
+        st.info("Click above to auto-train (requires Kaggle setup).")
+    
+    st.header("📊 Model Info")
     st.write("""
-    - **Architecture**: MobileNetV2 (ImageNet pre-trained, frozen base) + Dense head with dropout.
-    - **Classes**: Buffalo and Cow (auto-detected from dataset folders).
-    - **Training**: 15 epochs, Adam optimizer, categorical cross-entropy.
-    - **Data**: ~1000 images from Kaggle, with augmentation (rotation, flips, shifts).
-    - **Performance**: Validation accuracy ~95-100% (dropout added to reduce overfitting).
+    - **Model**: MobileNetV2 + Dropout (anti-overfitting).
+    - **Classes**: Auto from dataset (buffalo, cow).
+    - **Training**: 15 epochs, 80/20 split, augmentation.
+    - **Acc**: ~95-100% validation.
     """)
     
-    st.header("💡 Tips for Best Results")
+    st.header("💡 Tips")
     st.write("""
-    - Use clear, front-facing photos of cows or buffaloes.
-    - Avoid blurry, dark, or non-animal images (may give low confidence).
-    - Model excels on dataset-like images (e.g., farm animals).
-    - Batch upload: Select multiple files to classify at once.
-    - Deploy: Push to GitHub and use Streamlit Cloud for sharing.
+    - Clear, lit images work best.
+    - Batch: Upload multiple for quick tests.
+    - Deploy: GitHub + Streamlit Cloud.
     """)
     
-    # Optional: Training history plot (uncomment if you save history in train_model.py)
-    # if st.checkbox("Show Training History"):
-    #     try:
-    #         import pickle
-    #         import matplotlib.pyplot as plt
-    #         with open('training_history.pkl', 'rb') as f:
-    #             history = pickle.load(f)
-    #         fig, ax = plt.subplots()
-    #         ax.plot(history['accuracy'], label='Training Accuracy')
-    #         ax.plot(history['val_accuracy'], label='Validation Accuracy')
-    #         ax.set_xlabel('Epoch')
-    #         ax.set_ylabel('Accuracy')
-    #         ax.legend()
-    #         st.pyplot(fig)
-    #     except FileNotFoundError:
-    #         st.warning("Training history file not found.")
+    # Training history plot
+    if st.checkbox("📈 Show Training History") and os.path.exists('training_history.pkl'):
+        try:
+            with open('training_history.pkl', 'rb') as f:
+                history = pickle.load(f)
+            fig, ax = plt.subplots()
+            ax.plot(history['accuracy'], label='Train Acc')
+            ax.plot(history['val_accuracy'], label='Val Acc')
+            ax.set_title('Training History')
+            ax.legend()
+            st.pyplot(fig)
+        except Exception as e:
+            st.error(f"Plot error: {e}")
 
 # Footer
 st.markdown("---")
-st.caption("🤖 Built with Streamlit & TensorFlow | Project: BoviTech | Questions? Check the sidebar.")
+st.caption("🤖 Powered by Streamlit & TensorFlow | BoviTech Project")
