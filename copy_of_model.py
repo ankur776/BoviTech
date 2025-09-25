@@ -2,6 +2,7 @@
 # Loads the trained H5 model and classifies uploaded images
 
 import streamlit as st
+import tensorflow as tf
 from PIL import Image
 import numpy as np
 import json
