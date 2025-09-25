@@ -7,6 +7,14 @@ Original file is located at
     https://colab.research.google.com/drive/1SzmZsBF3nf0UoiFFJQoAEEZ1DjmyR_nK
 """
 #!/bin/bash
+# example if you have a direct link
+curl -L -o cows.zip "https://example.com/path/to/cows-and-buffalo-computer-vision-dataset.zip"
+
+# or use kaggle CLI (if dataset is on Kaggle)
+pip install kaggle
+# put your kaggle.json in ~/.kaggle/
+kaggle datasets download -d raghavdharwal/cows-and-buffalo-computer-vision-dataset -p .
+unzip cows.zip -d dataset_raw
 
 
 """## Train the model
