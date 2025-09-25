@@ -11,23 +11,6 @@ Original file is located at
   https://www.kaggle.com/api/v1/datasets/download/raghavdharwal/cows-and-buffalo-computer-vision-dataset
 !unzip ~/cows-and-buffalo-computer-vision-dataset.zip -d ~/cows-and-buffalo-computer-vision-dataset
 
-import os
-import requests
-
-# Define the URL of the dataset and the local path where it should be saved
-url = "https://link.to/your/cows-and-buffalo-computer-vision-dataset.zip"
-output_path = os.path.expanduser("~/cows-and-buffalo-computer-vision-dataset.zip")
-
-# Download the dataset using requests
-response = requests.get(url, stream=True)
-response.raise_for_status()  # Raise an error for bad responses
-
-with open(output_path, "wb") as f:
-    for chunk in response.iter_content(chunk_size=8192):
-        f.write(chunk)
-
-print("Download complete:", output_path)
-
 """## Train the model
 
 ### Subtask:
