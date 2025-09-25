@@ -1,44 +1,17 @@
-# app.py - Updated Streamlit app with integrated training trigger
-# Auto-trains if model missing; supports batch upload and demo mode
-# Matplotlib import moved inside conditional (no crash if not installed)
+# app.py - Cloud-safe Streamlit app: Pre-loads model, skips auto-train on Cloud
 
 import streamlit as st
-import tensorflow as tf
-import subprocess
-import sys
 import os
 import json
 import numpy as np
 from PIL import Image
 import pickle
 
-# Page config
-st.set_page_config(
-    page_title="Cow vs. Buffalo Classifier",
-    page_icon="🐄",
-    layout="wide"
-)
+# Detect if running on Streamlit Cloud (via env vars)
+IS_CLOUD = 'streamlit' in os.environ.get('HOME', '') or os.environ.get('STREAMLIT_CLOUD_RUN', False)
 
-# Function to run training script if model missing
-@st.cache_resource
-def ensure_model_trained():
-    if not os.path.exists('cow_buffalo_model.h5'):
-        st.sidebar.warning("Model not found. Training now...")
-        try:
-            # Run train_model.py as subprocess
-            result = subprocess.run([sys.executable, 'train_model.py'], capture_output=True, text=True, timeout=1800)  # 30 min timeout
-            if result.returncode != 0:
-                st.error(f"Training failed: {result.stderr}")
-                return None
-            st.sidebar.success("Training completed!")
-            st.rerun()  # Refresh to load model
-        except subprocess.TimeoutExpired:
-            st.error("Training timed out. Run 'python train_model.py' manually in terminal.")
-            return None
-        except FileNotFoundError:
-            st.error("train_model.py not found. Ensure both .py files are in the same folder.")
-            return None
-    return True
+# Page config
+st.set_page_config(page_title="Cow vs. Buffalo Classifier", page_icon="🐄", layout="wide")
 
 # Load class names
 @st.cache_data
@@ -54,42 +27,47 @@ class_names = load_class_names()
 # Load model
 @st.cache_resource
 def load_model():
+    if not os.path.exists('cow_buffalo_model.h5'):
+        return None
     try:
         model = tf.keras.models.load_model('cow_buffalo_model.h5')
+        model_size = os.path.getsize('cow_buffalo_model.h5') / (1024*1024)  # MB
+        st.success(f"✅ Model loaded! Size: {model_size:.1f} MB")
         return model
-    except FileNotFoundError:
-        return None
     except Exception as e:
         st.error(f"Model load error: {str(e)}")
         return None
 
-# Ensure trained and load
-trained = ensure_model_trained()
-model = load_model() if trained else None
+import tensorflow as tf  # Import here to avoid early errors
+model = load_model()
 
 # Title
 st.title('🐄 Cow vs. 🐃 Buffalo Image Classifier')
 st.markdown("""
 Classify images as 'Cow' or 'Buffalo' using MobileNetV2 transfer learning.  
-Trained on [Kaggle Dataset](https://www.kaggle.com/datasets/raghavdharwal/cows-and-buffalo-computer-vision-dataset) with augmentation.
+Trained on [Kaggle Dataset](https://www.kaggle.com/datasets/raghavdharwal/cows-and-buffalo-computer-vision-dataset).
 """)
 
-# Status
+# Status and Cloud Warning
 if model:
-    st.success("✅ Model loaded and ready!")
+    st.success("✅ Ready to classify!")
 else:
-    st.warning("⚠️ Model not available. Use sidebar to train.")
-    if st.button("Demo Mode (Dummy Prediction)"):
-        st.info("Demo: This uses fallback classes. Upload a real image after training.")
+    st.error("❌ Model file 'cow_buffalo_model.h5' not found.")
+    if IS_CLOUD:
+        st.info("""
+        **For Streamlit Cloud**: Pre-train locally with `python train_model.py`, then commit `cow_buffalo_model.h5`, 
+        `class_names.json` to GitHub (use Git LFS for .h5). No auto-training on Cloud.
+        """)
+    else:
+        st.info("Run `python train_model.py` locally to generate the model.")
+    st.stop()  # Halt if no model
 
 # Uploader
 uploaded_files = st.file_uploader(
-    "Choose image(s) (JPG, PNG)...",
-    type=['jpg', 'jpeg', 'png'],
-    accept_multiple_files=True
+    "Choose image(s) (JPG, PNG)...", type=['jpg', 'jpeg', 'png'], accept_multiple_files=True
 )
 
-if uploaded_files and model:
+if uploaded_files:
     st.subheader("Results")
     progress_bar = st.progress(0)
     for idx, uploaded_file in enumerate(uploaded_files):
@@ -123,36 +101,27 @@ if uploaded_files and model:
         st.bar_chart({cls: float(prob.strip('%')) for cls, prob in probs.items()})
         
         progress_bar.progress((idx + 1) / len(uploaded_files))
-elif uploaded_files and not model:
-    st.warning("Upload ready, but train the model first via sidebar.")
 
 # Sidebar
 with st.sidebar:
-    st.header("🔧 Controls")
-    if not model:
-        if st.button("🚀 Train Model Now", type="primary"):
-            st.rerun()  # Triggers ensure_model_trained()
-        st.info("Click above to auto-train (requires Kaggle setup). Or pre-train locally and commit model files.")
-    
     st.header("📊 Model Info")
     st.write("""
-    - **Model**: MobileNetV2 + Dropout (anti-overfitting).
-    - **Classes**: Auto from dataset (buffalo, cow).
-    - **Training**: 15 epochs, 80/20 split, augmentation.
-    - **Acc**: ~95-100% validation.
+    - **Model**: MobileNetV2 + Dropout.
+    - **Classes**: Buffalo, Cow.
+    - **Training**: 15 epochs, augmentation.
+    - **Acc**: ~95-100%.
     """)
     
     st.header("💡 Tips")
     st.write("""
-    - Clear, lit images work best.
-    - Batch: Upload multiple for quick tests.
-    - Deploy: Pre-train model locally for Cloud (commit .h5 file).
+    - Use clear animal photos.
+    - Batch upload supported.
+    - For Cloud: Pre-train & commit model.
     """)
     
-    # Training history plot (lazy-load matplotlib)
+    # Lazy-load plot
     if st.checkbox("📈 Show Training History") and os.path.exists('training_history.pkl'):
         try:
-            # Import matplotlib ONLY here (lazy-load: no crash if missing)
             import matplotlib.pyplot as plt
             with open('training_history.pkl', 'rb') as f:
                 history = pickle.load(f)
@@ -160,15 +129,13 @@ with st.sidebar:
             ax.plot(history['accuracy'], label='Train Acc')
             ax.plot(history['val_accuracy'], label='Val Acc')
             ax.set_title('Training History')
-            ax.set_xlabel('Epoch')
-            ax.set_ylabel('Accuracy')
             ax.legend()
             st.pyplot(fig)
         except ImportError:
-            st.warning("Matplotlib not installed. Install with 'pip install matplotlib' (or add to requirements.txt) to view plots.")
+            st.warning("Install matplotlib for plots.")
         except Exception as e:
             st.error(f"Plot error: {e}")
 
 # Footer
 st.markdown("---")
-st.caption("🤖 Powered by Streamlit & TensorFlow | BoviTech Project")
+st.caption("🤖 Powered by Streamlit & TensorFlow | BoviTech")
